@@ -1,0 +1,279 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+		<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+		<link rel="stylesheet" type="text/css" href="./css/default.css">
+
+		<title>OPENUI5 Weather Application</title>
+		<script src="https://sapui5.hana.ondemand.com/resources/sap-ui-core.js"
+			type="text/javascript" 
+			id="sap-ui-bootstrap"
+			data-sap-ui-libs="sap.ui.commons,sap.m"
+			data-sap-ui-theme="sap_bluecrystal"
+			data-sap-ui-xx-bindingSyntax="complex">
+		</script>
+		<script src="https://maps.googleapis.com/maps/api/js?sensor=false"></script>
+		<script type="text/javascript">
+			jQuery(function() {
+				// init app data
+				var initApp = updateWeather(oComboBoxCities.getValue());
+				// register all available templates in the document
+				sap.ui.template();
+			});
+
+			/// Header
+			// create the ApplicationHeader control
+			var oAppHeader = new sap.ui.commons.ApplicationHeader("appHeader");
+			oAppHeader.setLogoSrc("http://www.sap.com/global/images/SAPLogo.gif");
+			oAppHeader.setLogoText("SAPUI5/OPENUI5 Homework Application");
+			oAppHeader.setDisplayWelcome(true);
+			oAppHeader.setUserName("Milen Voutchev");
+			oAppHeader.setDisplayLogoff(false);
+			oAppHeader.placeAt("container");
+
+			/// Main data model (cities)
+			var oCitiesModel = new sap.ui.model.json.JSONModel();
+			oCitiesModel.setData({
+					cities:[
+						{ name:"Sofia", enabled:true },
+						{ name:"Istanbul", enabled:false },
+						{ name:"Moscow", enabled:true },
+						{ name:"London", enabled:true },
+						{ name:"Saint Petersburg", enabled:true },
+						{ name:"Athens", enabled:true },
+						{ name:"Madrid", enabled:true },
+						{ name:"Kiev", enabled:true },
+						{ name:"Rome", enabled:true },
+						{ name:"Paris", enabled:true },
+						{ name:"Minsk", enabled:true },
+						{ name:"Bucharest", enabled:true },
+						{ name:"Vienna", enabled:true },
+						{ name:"Berlin", enabled:true }
+					]
+			});
+			//sap.ui.getCore().setModel(oCitiesModel);    // set as global model as well
+			
+			/// Label for cities
+			var oLabelCities = new sap.ui.commons.Label();
+			oLabelCities.setLabelFor(oComboBoxCities);
+			oLabelCities.setText("Find weather conditions in: ");
+			oLabelCities.setDesign(sap.ui.commons.LabelDesign.Bold);
+
+			/// Combobox for cities list
+			var oItemTemplateCities = new sap.ui.core.ListItem();
+			oItemTemplateCities
+				.bindProperty("text", "name")
+				.bindProperty("enabled", "enabled");
+			var oComboBoxCities = new sap.ui.commons.ComboBox("ComboBoxCities");
+			oComboBoxCities
+				.setTooltip('City')
+				.setEditable(true)
+				.setModel(oCitiesModel)
+				.bindItems("/cities", oItemTemplateCities)
+				.setValue('Sofia')
+				.attachChange(function(){
+					updateWeather(oComboBoxCities.getValue());
+				});
+
+			/// Weather data model
+			var oModelWeather = new sap.ui.model.json.JSONModel();
+			sap.ui.getCore().setModel(oModelWeather);    // set as global model as well
+			
+			/// Weather Details Matrix
+			var oCityDetailIcon = new sap.ui.commons.Image()
+				.bindProperty("src", "/weather/0/icon", function (bValue){
+					return "http://openweathermap.org/img/w/" + bValue + ".png";
+				});
+			var oCityDetailTitle = new sap.ui.commons.TextView({
+					semanticColor: sap.ui.commons.TextViewColor.Positive,
+					design: sap.ui.commons.TextViewDesign.H1
+				})
+				.bindProperty("text", "/name");
+
+			var oLayoutCityTemp = new sap.ui.commons.Label({text:"Temperature:"});
+			var oLayoutCityTempTV = new sap.ui.commons.TextView({ design: sap.ui.commons.TextViewDesign.H2 })
+				.bindProperty("text", "/main/temp", function (bValue){
+						return fahrToCelsius(bValue);
+					});
+
+			var oLayoutCityMain = new sap.ui.commons.Label({text:"Conditions:"});
+			var oLayoutCityMainTV = new sap.ui.commons.TextView()
+				.bindProperty("text", "/weather/0/main");
+
+			var oLayoutCityDesc = new sap.ui.commons.Label({text:"In detail:"});
+			var oLayoutCityDescTV = new sap.ui.commons.TextView()
+				.bindProperty("text", "/weather/0/description");
+
+			var oLayoutCityMin = new sap.ui.commons.Label({text:"Min Temperature:"});
+			var oLayoutCityMinTV = new sap.ui.commons.TextView()
+				.bindProperty("text", "/main/temp_min", function (bValue){
+						return fahrToCelsius(bValue);
+					});
+			
+			var oLayoutCityMax = new sap.ui.commons.Label({text:"Max Temperature:"});
+			var oLayoutCityMaxTV = new sap.ui.commons.TextView()
+				.bindProperty("text", "/main/temp_max", function (bValue){
+						return fahrToCelsius(bValue);
+					});
+			
+			var oLayoutCityWind = new sap.ui.commons.Label({text:"Wind:"});
+			var oLayoutCityWindTV = new sap.ui.commons.TextView()
+				.bindProperty("text", "/wind/speed", function (bValue){
+					return (mpsToKmh(bValue) + " km/h");
+					});
+			
+			var oLayoutCityDetail = new sap.ui.commons.layout.MatrixLayout({
+					id : "citydetail",
+					layoutFixed : true,
+					columns: 2
+				})
+				.createRow( oCityDetailIcon, oCityDetailTitle )
+				.createRow( oLayoutCityTemp, oLayoutCityTempTV )
+				.createRow( oLayoutCityMain, oLayoutCityMainTV )
+				.createRow( oLayoutCityDesc, oLayoutCityDescTV )
+				.createRow( oLayoutCityMin, oLayoutCityMinTV )
+				.createRow( oLayoutCityMax, oLayoutCityMaxTV )
+				.createRow( oLayoutCityWind, oLayoutCityWindTV );
+
+
+			/// Map Container
+			var oMapContainer = new sap.ui.core.HTML({
+				id: "mapcontainer",
+				content: "<div></div>"
+			});
+
+			/// Right Container
+			var oHtmlContainer = new sap.ui.core.HTML({
+				content: "<div id=\"dataTemplateRight\" data-type=\"text/x-handlebars-template\">"
+					+"<h1>{{text path=\"/name\"}}</h1>"
+					+"</div>"
+			});
+
+			
+
+			/// Create a BorderLayout instance
+			var oBorderLayoutMaster = new sap.ui.commons.layout.BorderLayout("BorderLayout1", { height: "300px",
+					top: new sap.ui.commons.layout.BorderLayoutArea({
+						size: "20%",
+						contentAlign: "center",
+						visible: true,
+						content: [ oLabelCities, oComboBoxCities]
+					}),
+					bottom: new sap.ui.commons.layout.BorderLayoutArea({
+						size: "20%",
+						contentAlign: "center",
+						visible: false,
+						content: [new sap.ui.commons.TextView({text: 'Bottom Area', design: sap.ui.commons.TextViewDesign.Bold })]
+					}),
+					begin: new sap.ui.commons.layout.BorderLayoutArea({
+						id: "BorderLayoutAreaBegin",
+						size: "300px",
+						contentAlign: "center",
+						visible: true,
+						content: oLayoutCityDetail
+					}),
+					center: new sap.ui.commons.layout.BorderLayoutArea({
+						id: "BorderLayout1Center",
+						contentAlign: "center",
+						visible: true,
+						content: oMapContainer
+					}),
+					end: new sap.ui.commons.layout.BorderLayoutArea({
+						size: "20%",
+						contentAlign: "center",
+						visible: false,
+						content: [new sap.ui.commons.TextView({text: 'End Area', design: sap.ui.commons.TextViewDesign.Bold })]
+					})
+			});
+
+			// Attach the BorderLayout to the page
+			oBorderLayoutMaster.placeAt("container");
+
+			
+			/// method to update the weather data
+			var updateWeather = function(city) {
+				oBorderLayoutMaster.setBusy(true);
+				// Retrieve weather data from openweather.org via the destination openweathermap
+				$.ajax({
+						url: "http://api.openweathermap.org/data/2.5/weather?q=" + city,
+						//url: "/openweathermap?q=" + city,
+
+						contentType: 'application/json; charset=utf-8',
+						type: 'GET',
+						dataType: 'jsonp',
+						error: function (xhr, status) {
+							alert(status);
+							oBorderLayoutMaster.setBusy(false);
+						},
+						success: function (result) {
+							console.log(result);
+							oModelWeather.setData(result);
+							// create map
+							updateMap("mapcontainer", oModelWeather.getProperty("/coord/lon"), oModelWeather.getProperty("/coord/lat"));
+							oBorderLayoutMaster.setBusy(false);
+						}
+				});
+				return true;
+			};
+			
+			/// Update Google Maps Action
+			var updateMap = function(elementId, lon, lat) {
+				var latlng, map, marker, options;
+
+				if ( !lon || !lat ) 
+					return false;
+
+				latlng = new google.maps.LatLng(lat, lon);
+				options = {
+					zoom: 5,
+					center: latlng,
+					mapTypeId: google.maps.MapTypeId.SATELLITE  
+				};
+				map = new google.maps.Map(document.getElementById(elementId), options);
+				return marker = new google.maps.Marker({
+						position: latlng,
+						map: map
+				});
+			};
+
+			/// Convert meter per second to kilometer per hour
+			var mpsToKmh = function (mps){
+				if (!mps)
+					return false;
+					
+				return Math.round(mps*100 * 3.6)/100;// return with double precision
+			}
+
+			/// Convert Fahrenheit to Celsius
+			var fahrToCelsius = function (degreeFahr){
+				if (!degreeFahr)
+					return false;
+					
+				// We want Celsius
+				var degreesCelsius = Math.round(degreeFahr - 273.15);
+				// Also add the degree symbol to the temperature value
+				return degreesCelsius + "\u00b0";				
+			}
+
+		</script>
+	</head>
+	<body id="body" class="sapUiBody" role="application">
+		<div style="height:450px;" id="container">
+		</div><!--container-->
+
+
+		<div id="dataTemplate" data-type="text/x-handlebars-template">
+			<p>Or... we might utilize the HTML templating =)</p>
+			<hr />
+			<h1>{{text path="/name"}} <img class="dataTemplateIcon" src="http://openweathermap.org/img/w/{{text path='/weather/0/icon'}}.png" title="{{text path="main"}}" /></h1>
+
+			<ul>
+				{{#each path="/weather"}}
+				<li>Conditions: {{text path="main"}}</li>
+				<li>In detail: {{text path="description"}}</li>
+				{{/each}}
+			</ul>
+		</div>
+
+	</body>
+</html>
